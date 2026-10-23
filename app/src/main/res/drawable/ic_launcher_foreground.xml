@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 두 개의 번호를 상징하는 겹친 원 (파랑 = 기본, 초록 = 듀얼) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#3B5BDB"
+        android:pathData="M27,54a18,18 0 1,0 36,0a18,18 0 1,0 -36,0" />
+    <path
+        android:fillColor="#0C9A6C"
+        android:fillAlpha="0.9"
+        android:pathData="M45,54a18,18 0 1,0 36,0a18,18 0 1,0 -36,0" />
+</vector>
