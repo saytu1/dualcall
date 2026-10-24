@@ -7,8 +7,10 @@ data class Config(
     val dualNumber: String = "",
     /** 듀얼 발신 기호: 안드로이드 '#', 아이폰 '*' */
     val suffix: Char = '#',
-    /** true: 바로 걸기, false: 다이얼러에 번호만 입력 */
-    val directCall: Boolean = true,
+    /** 듀얼번호로 전화가 오면 알림 */
+    val notifyDual: Boolean = true,
+    /** 기본번호로 전화가 와도 알림 */
+    val notifyMain: Boolean = false,
 )
 
 class Prefs(context: Context) {
@@ -24,7 +26,8 @@ class Prefs(context: Context) {
         mainNumber = sp.getString("main", "") ?: "",
         dualNumber = sp.getString("dual", "") ?: "",
         suffix = (sp.getString("suffix", "#") ?: "#").firstOrNull() ?: '#',
-        directCall = sp.getBoolean("direct", true),
+        notifyDual = sp.getBoolean("notify_dual", true),
+        notifyMain = sp.getBoolean("notify_main", false),
     )
 
     fun save(c: Config) {
@@ -32,7 +35,8 @@ class Prefs(context: Context) {
             .putString("main", c.mainNumber)
             .putString("dual", c.dualNumber)
             .putString("suffix", c.suffix.toString())
-            .putBoolean("direct", c.directCall)
+            .putBoolean("notify_dual", c.notifyDual)
+            .putBoolean("notify_main", c.notifyMain)
             .apply()
     }
 }

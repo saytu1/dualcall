@@ -50,18 +50,29 @@ private fun buildTimeline(events: List<Event>): List<TimelineRow> {
 }
 
 @Composable
-fun DetailScreen(state: UiState, key: String, line: Line, onBack: () -> Unit) {
+fun DetailScreen(
+    state: UiState,
+    key: String,
+    line: Line,
+    onRename: (String, String?) -> Unit,
+    onDelete: () -> Unit,
+    onBack: () -> Unit,
+) {
     val context = LocalContext.current
     val config = state.config
-    val events = remember(state.events, key, line) { state.events.filter { it.key == key && it.line == line } }
+    val events = remember(state.events, key, line) {
+        state.events.filter { it.key == key && it.line == line }.sortedByDescending { it.time }
+    }
     val rows = remember(events) { buildTimeline(events) }
-    val name = state.contacts[key]
+    val name = state.names[key]
     val s = lineStyle(line)
     val other = if (line == Line.DUAL) Line.MAIN else Line.DUAL
     val otherStyle = lineStyle(other)
     val myNumber = if (line == Line.DUAL) config.dualNumber else config.mainNumber
     var text by rememberSaveable { mutableStateOf("") }
     var menuOpen by remember { mutableStateOf(false) }
+    var renameOpen by remember { mutableStateOf(false) }
+    var deleteOpen by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -107,9 +118,14 @@ fun DetailScreen(state: UiState, key: String, line: Line, onBack: () -> Unit) {
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             DropdownMenuItem(
+                                text = { Text(if (name == null) "이름 붙이기" else "이름 바꾸기") },
+                                enabled = key.isNotEmpty(),
+                                onClick = { menuOpen = false; renameOpen = true },
+                            )
+                            DropdownMenuItem(
                                 text = { Text("${otherStyle.longLabel}로 전화") },
                                 leadingIcon = { LineDot(otherStyle.accent) },
-                                onClick = { menuOpen = false; Actions.call(context, key, other, config) },
+                                onClick = { menuOpen = false; Actions.dial(context, key, other, config) },
                             )
                             DropdownMenuItem(
                                 text = { Text("${otherStyle.longLabel}로 문자") },
@@ -118,7 +134,12 @@ fun DetailScreen(state: UiState, key: String, line: Line, onBack: () -> Unit) {
                             )
                             DropdownMenuItem(
                                 text = { Text("발신 번호 복사 (${PhoneUtils.dial(key, line, config.suffix)})") },
+                                enabled = key.isNotEmpty(),
                                 onClick = { menuOpen = false; Actions.copy(context, key, line, config) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("기록 삭제", color = MaterialTheme.colorScheme.error) },
+                                onClick = { menuOpen = false; deleteOpen = true },
                             )
                         }
                     }
@@ -128,10 +149,10 @@ fun DetailScreen(state: UiState, key: String, line: Line, onBack: () -> Unit) {
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    ActionButton("${s.via} 전화", Icons.Filled.Call, s, Modifier.weight(1f)) {
-                        Actions.call(context, key, line, config)
+                    ActionButton("${s.via} 전화", Icons.Filled.Call, s, Modifier.weight(1f), enabled = key.isNotEmpty()) {
+                        Actions.dial(context, key, line, config)
                     }
-                    ActionButton("${s.via} 문자", Icons.Filled.Email, s, Modifier.weight(1f), filled = false) {
+                    ActionButton("${s.via} 문자", Icons.Filled.Email, s, Modifier.weight(1f), filled = false, enabled = key.isNotEmpty()) {
                         Actions.sms(context, key, line, config)
                     }
                 }
@@ -151,15 +172,17 @@ fun DetailScreen(state: UiState, key: String, line: Line, onBack: () -> Unit) {
             }
         },
         bottomBar = {
-            Composer(
-                text = text,
-                onChange = { text = it },
-                style = s,
-                onSend = {
-                    Actions.sms(context, key, line, config, text)
-                    text = ""
-                },
-            )
+            if (key.isNotEmpty()) {
+                Composer(
+                    text = text,
+                    onChange = { text = it },
+                    style = s,
+                    onSend = {
+                        Actions.sms(context, key, line, config, text)
+                        text = ""
+                    },
+                )
+            }
         },
     ) { pad ->
         LazyColumn(
@@ -171,11 +194,49 @@ fun DetailScreen(state: UiState, key: String, line: Line, onBack: () -> Unit) {
             items(rows, key = { it.id }) { row ->
                 when (row) {
                     is TimelineRow.Day -> DayHeader(row.label)
-                    is TimelineRow.Item ->
-                        if (row.event.kind == Kind.SMS) SmsBubble(row.event, s) else CallPill(row.event)
+                    is TimelineRow.Item -> CallPill(row.event, s)
                 }
             }
         }
+    }
+
+    if (renameOpen) {
+        var draft by remember { mutableStateOf(name.orEmpty()) }
+        AlertDialog(
+            onDismissRequest = { renameOpen = false },
+            title = { Text("이름 붙이기") },
+            text = {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    singleLine = true,
+                    placeholder = { Text("예: 거래처 김과장") },
+                    shape = RoundedCornerShape(12.dp),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { onRename(key, draft); renameOpen = false }) { Text("저장") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameOpen = false }) { Text("취소") }
+            },
+        )
+    }
+
+    if (deleteOpen) {
+        AlertDialog(
+            onDismissRequest = { deleteOpen = false },
+            title = { Text("기록 삭제") },
+            text = { Text("이 상대와의 ${s.longLabel} 기록을 앱에서 지워요. 휴대폰 통화기록은 그대로예요.") },
+            confirmButton = {
+                TextButton(onClick = { deleteOpen = false; onDelete() }) {
+                    Text("삭제", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteOpen = false }) { Text("취소") }
+            },
+        )
     }
 }
 
@@ -187,59 +248,43 @@ private fun DayHeader(label: String) {
 }
 
 @Composable
-private fun SmsBubble(e: Event, s: LineStyle) {
+private fun CallPill(e: Event, s: LineStyle) {
     val out = e.direction == Direction.OUT
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (out) Arrangement.End else Arrangement.Start,
     ) {
         Column(horizontalAlignment = if (out) Alignment.End else Alignment.Start) {
-            Text(
-                text = e.body.orEmpty(),
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (out) s.onAccent else MaterialTheme.colorScheme.onSurface,
+            Row(
                 modifier = Modifier
-                    .widthIn(max = 290.dp)
-                    .clip(
-                        RoundedCornerShape(
-                            topStart = 18.dp,
-                            topEnd = 18.dp,
-                            bottomStart = if (out) 18.dp else 6.dp,
-                            bottomEnd = if (out) 6.dp else 18.dp,
-                        )
-                    )
-                    .background(if (out) s.accent else MaterialTheme.colorScheme.surfaceContainerLowest)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(if (out) s.container else MaterialTheme.colorScheme.surfaceContainerLowest)
                     .padding(horizontal = 14.dp, vertical = 10.dp),
-            )
-            Text(
-                TimeFmt.clock(e.time),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun CallPill(e: Event) {
-    val missed = e.direction == Direction.MISSED || e.direction == Direction.REJECTED
-    val color = if (missed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-    Box(Modifier.fillMaxWidth().padding(vertical = 2.dp), contentAlignment = Alignment.Center) {
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(MaterialTheme.colorScheme.surfaceContainerLowest)
-                .padding(horizontal = 14.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Filled.Call, contentDescription = null, tint = color, modifier = Modifier.size(14.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(
-                "${callLabel(e)} · ${TimeFmt.clock(e.time)}",
-                style = MaterialTheme.typography.labelMedium,
-                color = color,
-            )
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.Call,
+                    contentDescription = null,
+                    tint = s.accent,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Column {
+                    Text(
+                        "${previewText(e)} · ${TimeFmt.clock(e.time)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = if (out) s.onContainer else MaterialTheme.colorScheme.onSurface,
+                    )
+                    if (e.rawNumber.isNotEmpty()) {
+                        Text(
+                            "수신 원본  ${e.rawNumber}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
         }
     }
 }

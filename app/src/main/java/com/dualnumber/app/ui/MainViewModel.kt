@@ -3,58 +3,73 @@ package com.dualnumber.app.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.dualnumber.app.data.CommRepository
 import com.dualnumber.app.data.Config
 import com.dualnumber.app.data.Event
+import com.dualnumber.app.data.EventStore
+import com.dualnumber.app.data.Line
+import com.dualnumber.app.data.NameStore
 import com.dualnumber.app.data.Prefs
-import com.dualnumber.app.data.REQUIRED_PERMISSIONS
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import com.dualnumber.app.service.Notifier
+import com.dualnumber.app.util.Setup
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 
-data class UiState(
-    val loading: Boolean = true,
-    val events: List<Event> = emptyList(),
-    val contacts: Map<String, String> = emptyMap(),
-    val granted: Set<String> = emptySet(),
-    val config: Config = Config(),
+data class SetupStatus(
+    val roleAvailable: Boolean = true,
+    val roleHeld: Boolean = false,
+    val notificationsOk: Boolean = true,
 )
 
-class MainViewModel(app: Application) : AndroidViewModel(app) {
+data class UiState(
+    val events: List<Event> = emptyList(),
+    val names: Map<String, String> = emptyMap(),
+    val config: Config = Config(),
+    val setup: SetupStatus = SetupStatus(),
+)
+
+class MainViewModel(private val app: Application) : AndroidViewModel(app) {
     private val prefs = Prefs(app)
-    private val repo = CommRepository(app)
-    private val _state = MutableStateFlow(UiState(config = prefs.load()))
-    val state: StateFlow<UiState> = _state.asStateFlow()
-    private var job: Job? = null
+    private val config = MutableStateFlow(prefs.load())
+    private val setup = MutableStateFlow(readSetup())
+
+    init {
+        EventStore.init(app)
+        NameStore.init(app)
+        Notifier.ensureChannels(app)
+    }
+
+    val state: StateFlow<UiState> =
+        combine(EventStore.events, NameStore.names, config, setup) { e, n, c, s -> UiState(e, n, c, s) }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.Eagerly,
+                UiState(EventStore.events.value, NameStore.names.value, config.value, setup.value),
+            )
+
+    private fun readSetup() = SetupStatus(
+        roleAvailable = Setup.roleAvailable(app),
+        roleHeld = Setup.roleHeld(app),
+        notificationsOk = Setup.notificationsEnabled(app),
+    )
+
+    fun refreshSetup() {
+        setup.value = readSetup()
+    }
 
     fun isOnboarded(): Boolean = prefs.onboarded
     fun setOnboarded() {
         prefs.onboarded = true
     }
 
-    /** 통화기록·문자·연락처를 다시 읽는다. 화면에 돌아올 때마다 호출. */
-    fun refresh() {
-        job?.cancel()
-        job = viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                val granted = REQUIRED_PERMISSIONS.filter { repo.has(it) }.toSet()
-                val contacts = repo.loadContacts()
-                val events = (repo.loadCalls() + repo.loadSms()).sortedByDescending { it.time }
-                Triple(granted, contacts, events)
-            }
-            _state.update {
-                it.copy(loading = false, granted = result.first, contacts = result.second, events = result.third)
-            }
-        }
+    fun saveConfig(c: Config) {
+        prefs.save(c)
+        config.value = c
     }
 
-    fun saveConfig(config: Config) {
-        prefs.save(config)
-        _state.update { it.copy(config = config) }
-    }
+    fun setName(key: String, name: String?) = NameStore.set(app, key, name)
+    fun deleteConversation(key: String, line: Line) = EventStore.deleteConversation(app, key, line)
+    fun clearAll() = EventStore.clear(app)
 }

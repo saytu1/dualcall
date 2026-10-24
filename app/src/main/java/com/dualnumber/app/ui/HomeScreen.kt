@@ -30,50 +30,40 @@ import com.dualnumber.app.data.*
 import com.dualnumber.app.util.Actions
 import com.dualnumber.app.util.TimeFmt
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     state: UiState,
     onOpen: (Conversation) -> Unit,
     onNew: () -> Unit,
     onSettings: () -> Unit,
-    onRequestPermissions: () -> Unit,
+    onSetup: () -> Unit,
 ) {
     val context = LocalContext.current
     var lineTab by rememberSaveable { mutableIntStateOf(0) } // 0 전체, 1 기본, 2 듀얼
-    var kindTab by rememberSaveable { mutableIntStateOf(0) } // 0 전체, 1 전화, 2 문자
     var query by rememberSaveable { mutableStateOf("") }
 
-    val all = remember(state.events, state.contacts) { groupConversations(state.events, state.contacts) }
+    val all = remember(state.events, state.names) { groupConversations(state.events, state.names) }
     val mainCount = remember(all) { all.count { it.line == Line.MAIN } }
     val dualCount = remember(all) { all.count { it.line == Line.DUAL } }
 
-    val list = remember(state.events, state.contacts, lineTab, kindTab, query) {
-        val filtered = state.events.filter { e ->
-            val kindOk = when (kindTab) {
-                1 -> e.kind == Kind.CALL
-                2 -> e.kind == Kind.SMS
-                else -> true
-            }
-            val lineOk = when (lineTab) {
-                1 -> e.line == Line.MAIN
-                2 -> e.line == Line.DUAL
-                else -> true
-            }
-            kindOk && lineOk
-        }
+    val list = remember(all, lineTab, query) {
         val q = query.trim()
         val qd = q.filter { it.isDigit() }
-        groupConversations(filtered, state.contacts).filter { c ->
-            q.isEmpty() ||
+        all.filter { c ->
+            val lineOk = when (lineTab) {
+                1 -> c.line == Line.MAIN
+                2 -> c.line == Line.DUAL
+                else -> true
+            }
+            val queryOk = q.isEmpty() ||
                 c.name?.contains(q, ignoreCase = true) == true ||
                 (qd.isNotEmpty() && c.key.contains(qd))
+            lineOk && queryOk
         }
     }
 
-    val missing = REQUIRED_PERMISSIONS.filterNot { it in state.granted }
-    val mainStyle = lineStyle(Line.MAIN)
-    val dualStyle = lineStyle(Line.DUAL)
+    val setup = state.setup
+    val needsSetup = !setup.roleHeld || !setup.notificationsOk
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -109,52 +99,36 @@ fun HomeScreen(
                     }
                 }
             }
-            if (missing.isNotEmpty() && !state.loading) {
+            if (needsSetup) {
                 item {
-                    PermissionCard(
-                        missing = missing,
-                        onRequest = onRequestPermissions,
-                        onOpenSettings = { Actions.openAppSettings(context) },
+                    SetupCard(
+                        status = setup,
+                        onSetup = onSetup,
+                        onManual = {
+                            if (!setup.roleHeld) Actions.openDefaultApps(context)
+                            else Actions.openNotificationSettings(context)
+                        },
                     )
                 }
             }
-            item { SearchField(query) { query = it } }
+            if (all.isNotEmpty()) {
+                item { SearchField(query) { query = it } }
+            }
             item {
                 Segmented(
                     options = listOf("전체", "기본", "듀얼"),
                     selected = lineTab,
                     onSelect = { lineTab = it },
-                    dots = listOf(null, mainStyle.accent, dualStyle.accent),
+                    dots = listOf(null, lineStyle(Line.MAIN).accent, lineStyle(Line.DUAL).accent),
                     modifier = Modifier
                         .padding(horizontal = 20.dp, vertical = 6.dp)
                         .fillMaxWidth(),
                 )
             }
-            item {
-                Row(
-                    modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    listOf("전체", "전화", "문자").forEachIndexed { i, label ->
-                        FilterChip(
-                            selected = i == kindTab,
-                            onClick = { kindTab = i },
-                            label = { Text(label) },
-                            shape = RoundedCornerShape(50),
-                        )
-                    }
-                }
-            }
-            when {
-                state.loading -> item {
-                    Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(strokeWidth = 3.dp)
-                    }
-                }
-                list.isEmpty() -> item { EmptyState(lineTab) }
-                else -> items(list, key = { it.id }) { c ->
-                    ConversationRow(c) { onOpen(c) }
-                }
+            if (list.isEmpty()) {
+                item { EmptyState(lineTab, filtered = all.isNotEmpty()) }
+            } else {
+                items(list, key = { it.id }) { c -> ConversationRow(c) { onOpen(c) } }
             }
         }
     }
@@ -171,7 +145,7 @@ private fun Header(onSettings: () -> Unit) {
         Column(Modifier.weight(1f)) {
             Text("듀얼넘버", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text(
-                "기본·듀얼 번호로 온 연락을 구분해요",
+                "기본·듀얼 번호로 온 전화를 구분해요",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -216,37 +190,47 @@ private fun NumberCard(
             color = if (number.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
         )
         Spacer(Modifier.height(2.dp))
-        Text("대화 ${count}건", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("상대 ${count}명", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
-private fun PermissionCard(missing: List<String>, onRequest: () -> Unit, onOpenSettings: () -> Unit) {
+private fun SetupCard(status: SetupStatus, onSetup: () -> Unit, onManual: () -> Unit) {
+    val dual = lineStyle(Line.DUAL)
     Column(
         modifier = Modifier
             .padding(horizontal = 20.dp, vertical = 6.dp)
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
-            .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f), RoundedCornerShape(18.dp))
+            .background(dual.container)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("권한이 필요해요", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         Text(
-            missing.joinToString(" · ") { permissionLabel(it) },
+            if (!status.roleHeld) "설정을 마무리해 주세요" else "알림을 켜 주세요",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = dual.onContainer,
+        )
+        Text(
+            text = when {
+                !status.roleAvailable -> "이 기기는 발신자 확인 앱 지정을 지원하지 않아요. 회신 기능만 사용할 수 있어요."
+                !status.roleHeld -> "듀얼넘버를 '발신자 확인 및 스팸 앱'으로 지정해야 걸려오는 전화를 구분할 수 있어요."
+                else -> "듀얼번호로 전화가 오면 알림으로 알려드려요."
+            },
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = dual.onContainer,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onRequest, shape = RoundedCornerShape(12.dp)) { Text("권한 허용") }
-            OutlinedButton(onClick = onOpenSettings, shape = RoundedCornerShape(12.dp)) { Text("설정 열기") }
+        if (status.roleAvailable) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onSetup,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = dual.accent, contentColor = dual.onAccent),
+                ) { Text("지금 설정") }
+                TextButton(onClick = onManual) { Text("직접 설정", color = dual.onContainer) }
+            }
         }
-        Text(
-            "허용이 안 되면: 설정 열기 → 오른쪽 위 ⋮ → '제한된 설정 허용' → 권한에서 직접 허용",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
@@ -299,7 +283,6 @@ private fun SearchField(value: String, onChange: (String) -> Unit) {
 @Composable
 private fun ConversationRow(c: Conversation, onClick: () -> Unit) {
     val e = c.latest
-    val missed = e.kind == Kind.CALL && (e.direction == Direction.MISSED || e.direction == Direction.REJECTED)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -324,9 +307,9 @@ private fun ConversationRow(c: Conversation, onClick: () -> Unit) {
             }
             Spacer(Modifier.height(3.dp))
             Text(
-                text = previewText(e),
+                text = previewText(e) + if (c.events.size > 1) " · ${c.events.size}회" else "",
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (missed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -341,20 +324,25 @@ private fun ConversationRow(c: Conversation, onClick: () -> Unit) {
 }
 
 @Composable
-private fun EmptyState(lineTab: Int) {
+private fun EmptyState(lineTab: Int, filtered: Boolean) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         DualLogo(48.dp)
         Spacer(Modifier.height(16.dp))
-        Text("표시할 기록이 없어요", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(
+            if (filtered) "해당하는 기록이 없어요" else "아직 기록이 없어요",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
         Spacer(Modifier.height(6.dp))
         Text(
-            text = when (lineTab) {
-                2 -> "듀얼번호로 주고받은 전화·문자가 여기에 모여요"
-                1 -> "기본번호로 주고받은 전화·문자가 여기에 모여요"
-                else -> "통화기록과 문자가 여기에 표시돼요"
+            text = when {
+                filtered && lineTab == 2 -> "듀얼번호로 주고받은 전화가 여기에 모여요"
+                filtered && lineTab == 1 -> "기본번호로 주고받은 전화가 여기에 모여요"
+                filtered -> "검색어를 바꿔 보세요"
+                else -> "설치 이후 걸려온 전화부터 기록돼요.\n듀얼번호로 전화가 오면 알림으로 알려드려요."
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

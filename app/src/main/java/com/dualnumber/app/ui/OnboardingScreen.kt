@@ -58,16 +58,16 @@ fun OnboardingScreen(initial: Config, onDone: (Config) -> Unit) {
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                "기본번호와 듀얼번호로 온 전화·문자를 나눠 보여주고, 듀얼번호로 바로 회신할 수 있어요.",
+                "듀얼번호로 전화가 오면 바로 알려주고, 듀얼번호로 회신할 수 있게 도와줘요.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(24.dp))
 
             SectionCard("이렇게 동작해요") {
-                Step(1, "상대가 내 듀얼번호로 연락하면 상대 번호 끝에 # 이 붙어 기록돼요", dualStyle)
-                Step(2, "앱이 # 표시를 찾아 듀얼로 분류해요", dualStyle)
-                Step(3, "회신할 때 상대 번호 뒤에 # 을 자동으로 붙여, 상대에게 내 듀얼번호로 보여요", dualStyle)
+                Step(1, "상대가 내 듀얼번호로 전화하면 상대 번호 끝에 # 이 붙어 들어와요", dualStyle)
+                Step(2, "앱이 # 을 확인해 '듀얼로 온 전화' 알림을 띄우고 기록해요", dualStyle)
+                Step(3, "회신할 때 상대 번호 뒤에 # 을 붙여 전화 앱·메시지 앱을 열어줘요", dualStyle)
             }
 
             Spacer(Modifier.height(20.dp))
@@ -77,7 +77,8 @@ fun OnboardingScreen(initial: Config, onDone: (Config) -> Unit) {
             }
             Spacer(Modifier.height(12.dp))
             Text(
-                "시작하면 통화기록 · 문자 · 연락처 · 전화 권한을 요청해요. 기록은 휴대폰 밖으로 나가지 않아요.",
+                "시작하면 듀얼넘버를 '발신자 확인 및 스팸 앱'으로 지정하고 알림을 허용해 주세요. " +
+                    "문자·통화기록·연락처 권한은 쓰지 않으며, 기록은 휴대폰 안에만 저장돼요.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
